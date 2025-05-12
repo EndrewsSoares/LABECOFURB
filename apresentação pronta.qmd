@@ -1,0 +1,249 @@
+---
+title: "Endrews Soares"
+format: html
+editor: visual
+---
+
+```{r}
+#| label: load-packages
+#| include: false
+
+library(WDI)
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(sf)
+library(plotly)
+library(RColorBrewer)
+
+options(scipen = 999) # REMOVER A NOT. CIENT.
+# DADOS EM PAINEL
+
+Currentaccountbalance <- WDI(country = 'all',
+                             indicator = 'BN.CAB.XOKA.CD')
+
+# Limpar os dados
+Currentaccountbalance <- Currentaccountbalance %>%
+  filter(!is.na(BN.CAB.XOKA.CD)) %>%
+  filter(!is.na(country)) %>%
+  filter(!is.na(iso2c) & nchar(iso2c) == 2)
+
+# Pegar o ano mais recente disponível
+latest_year <- max(Currentaccountbalance$year, na.rm = TRUE)
+
+# Selecionar os top 9 países com maior superávit no último ano
+top9_countries <- Currentaccountbalance %>%
+  filter(year == latest_year) %>%
+  arrange(desc(BN.CAB.XOKA.CD)) %>%
+  slice(1:9) %>%
+  pull(country)
+
+# Garantir que o Brasil seja incluído
+brasil_dados <- Currentaccountbalance %>%
+  filter(country == "Brazil")
+
+# Combinar os dados dos top 9 + Brasil
+top9_com_brasil <- Currentaccountbalance %>%
+  filter(country %in% top9_countries) %>%
+  bind_rows(brasil_dados) %>%
+  distinct(country, year, .keep_all = TRUE)
+
+# Adicionar tooltip formatado
+Currentaccountbalance_top9 <- top9_com_brasil %>%
+  mutate(text = paste0("País: ", country,
+                       "<br>Ano: ", year,
+                       "<br>Valor: US$ ", scales::comma(BN.CAB.XOKA.CD, scale = 1e-9, suffix = "B")))
+
+# Paleta de cores
+cores <- brewer.pal(n = length(unique(Currentaccountbalance_top9$country)), name = "Set3")
+grafpainel <- ggplot(Currentaccountbalance_top9,
+                     aes(x = year, y = BN.CAB.XOKA.CD, color = country, group = country, text = text)) + 
+  geom_line(size = 1) +
+  scale_color_manual(values = cores) +
+  scale_x_continuous(breaks = seq(min(Currentaccountbalance_top9$year, na.rm = TRUE),
+                                  max(Currentaccountbalance_top9$year, na.rm = TRUE), by = 5)) +
+  scale_y_continuous(labels = label_dollar(scale = 1e-9, suffix = "B")) +
+  labs(title = "Evolução do Saldo da Conta Corrente - Top 9 Países + Brasil",
+       subtitle = "Dados a cada 5 anos | Valores em bilhões de dólares (USD)",
+       x = "Ano",
+       y = "Saldo da Conta Corrente (USD bilhões)",
+       color = "País") +
+  theme_minimal(base_family = "Arial") +
+  theme(plot.title = element_text(size = 18, face = "bold"),
+        plot.subtitle = element_text(size = 14, face = "italic"),
+        axis.text = element_text(size = 11),
+        axis.title = element_text(size = 13),
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.position = "bottom") +
+  guides(color = guide_legend(nrow = 2, byrow = TRUE))
+# CORTE TRANSVERSAL
+Currentaccountbalance2023 <- WDI(country = "all",
+                                 indicator = "BN.CAB.XOKA.CD",
+                                 start = 2023,
+                                 end = 2023,
+                                 extra = TRUE)
+
+# Limpar os dados
+Currentaccountbalance2023 <- Currentaccountbalance2023 %>%
+  filter(!is.na(BN.CAB.XOKA.CD),
+         !is.na(iso3c),
+         region != "Aggregates")
+
+# Obter limites realistas
+min_value <- min(Currentaccountbalance2023$BN.CAB.XOKA.CD, na.rm = TRUE)
+max_value <- max(Currentaccountbalance2023$BN.CAB.XOKA.CD, na.rm = TRUE)
+
+# Obter o mapa do mundo
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Juntar com os dados
+mapa_mundi <- left_join(world, 
+                        Currentaccountbalance2023, 
+                        by = c("iso_a3" = "iso3c"))
+
+# Gráfico com cores corrigidas e mapa maior
+grafico_mapa <- ggplot(mapa_mundi) +
+  geom_sf(aes(fill = BN.CAB.XOKA.CD,
+              text = paste("País: ", name, "<br>Saldo: ", 
+                           label_dollar(scale = 1e-9, suffix = "B")(BN.CAB.XOKA.CD))),
+          color = "white", size = 0.1) +
+  
+  # Paleta personalizada: vermelho forte → amarelo → verde claro → verde escuro
+  scale_fill_gradientn(
+    colours = c("#8B0000", "#FF4500", "#FFFF00", "#ADFF2F", "#006400"),
+    values = scales::rescale(c(min_value, -5e10, 0, 5e10, max_value)),
+    limits = c(min_value, max_value),
+    breaks = seq(round(min_value, -10), round(max_value, -10), by = 1e11),
+    labels = label_dollar(scale = 1e-9, suffix = "B"),
+    name = "Saldo da Conta Corrente\n(Bilhões de USD)",
+    guide = guide_colorbar(
+      title.position = "top",
+      barwidth = 0.5,
+      barheight = 20,
+      direction = "vertical"
+    )
+  ) +
+  
+  labs(
+    title = "Saldo da Conta Corrente por País (2023)",
+    subtitle = "Quanto mais verde, maior o superávit; quanto mais vermelho, maior o déficit",
+    caption = "Fonte: World Bank (WDI)"
+  ) +
+  
+  theme_minimal(base_family = "Arial") +
+  theme(
+    plot.title = element_text(size = 20, face = "bold"),
+    plot.subtitle = element_text(size = 13, face = "italic"),
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 10),
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    panel.grid = element_blank(),
+    plot.margin = margin(20, 20, 20, 20)
+  )
+# SÉRIE TEMPORAL
+# Dados do Brasil
+Currentaccountbalancebr <- WDI(country = 'BR',
+                               indicator = 'BN.CAB.XOKA.CD') %>%
+  arrange(year) %>%
+  rename(saldo_conta_corrente = BN.CAB.XOKA.CD) %>%
+  mutate(tipo_saldo = ifelse(saldo_conta_corrente >= 0, "Superávit", "Déficit"),
+         saldo_bilhoes = saldo_conta_corrente / 1e9,
+         tooltip_text = paste0("Ano: ", year, 
+                               "\nSaldo: US$ ", formatC(saldo_bilhoes, format = "f", digits = 2), " B"))
+
+# Identificar maiores impactos
+maior_superavit <- Currentaccountbalancebr %>%
+  filter(saldo_conta_corrente == max(saldo_conta_corrente, na.rm = TRUE))
+
+maior_deficit <- Currentaccountbalancebr %>%
+  filter(saldo_conta_corrente == min(saldo_conta_corrente, na.rm = TRUE))
+
+# Gráfico corrigido com linha visível
+grafico_brasil <- ggplot(Currentaccountbalancebr, aes(x = year, y = saldo_conta_corrente)) +
+  geom_area(aes(fill = tipo_saldo, text = tooltip_text), alpha = 0.3) +
+  
+  # Força a linha aparecer
+  geom_line(aes(x = year, y = saldo_conta_corrente, group = 1, text = tooltip_text),
+            color = "#0072B2", size = 1, inherit.aes = FALSE) +
+  
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_point(data = maior_superavit, aes(x = year, y = saldo_conta_corrente), color = "green", size = 3) +
+  geom_point(data = maior_deficit, aes(x = year, y = saldo_conta_corrente), color = "red", size = 3) +
+  geom_text(data = maior_superavit, aes(x = year, y = saldo_conta_corrente, label = paste0("Maior superávit\n", year)), 
+            vjust = -1.2, size = 3.5, color = "darkgreen") +
+  geom_text(data = maior_deficit, aes(x = year, y = saldo_conta_corrente, label = paste0("Maior déficit\n", year)), 
+            vjust = 1.8, size = 3.5, color = "darkred") +
+  scale_fill_manual(values = c("Superávit" = "#56B4E9", "Déficit" = "#E69F00")) +
+  scale_y_continuous(labels = label_dollar(scale = 1e-9, suffix = "B")) +
+  scale_x_continuous(breaks = seq(min(Currentaccountbalancebr$year), 
+                                  max(Currentaccountbalancebr$year), by = 5)) +
+  labs(title = "Histórico do Balanço de Conta Corrente - Brasil",
+       subtitle = "Valores anuais em bilhões de dólares (USD)",
+       x = "Ano",
+       y = "Saldo da Conta Corrente (USD bilhões)",
+       fill = "Tipo de Saldo") +
+  theme_minimal(base_family = "Arial") +
+  theme(plot.title = element_text(size = 18, face = "bold"),
+        plot.subtitle = element_text(size = 14, face = "italic"),
+        axis.text = element_text(size = 11),
+        axis.title = element_text(size = 13))
+```
+
+## Balanço de conta corrente
+
+O tema deste trabalho é o Balanço de Conta Corrente, tanto em âmbito nacional quanto mundial. A escolha deste assunto se justifica pela sua relevância no contexto econômico atual, uma vez que o balanço de conta corrente é um dos principais indicadores da posição externa de um país, refletindo a relação entre o que ele produz, consome e investe em relação ao restante do mundo. Compreender sua dinâmica é essencial para analisar o equilíbrio das economias, os fluxos comerciais e financeiros e os impactos das políticas econômicas.
+
+Para a elaboração desta análise, foram utilizadas informações extraídas do banco de dados *World Development Indicators* (WDI), disponibilizado pelo Banco Mundial, que reúne estatísticas econômicas confiáveis e atualizadas de diversos países ao redor do mundo.
+
+## Gráfico em Painel – Top 9 paises com maior saldo do balanço de conta corrente + Brasil
+
+A partir dos dados obtidos pelo WDI, observamos que os países com os maiores superávits na conta corrente — como China, Alemanha, Suíça e Singapura — mantêm uma trajetória relativamente estável e crescente ao longo dos anos. Esses resultados refletem economias com forte presença no comércio internacional, alto nível de poupança interna e uma estrutura produtiva voltada para exportações. A consistência desses superávits sugere um modelo econômico sustentável e competitivo.
+
+O Brasil, incluído na análise para fins comparativos, apresenta uma trajetória mais volátil. Em diferentes períodos, o país registra déficits e superávits, o que indica maior sensibilidade a fatores conjunturais, como preços de commodities, variação do câmbio, fluxo de capitais e políticas econômicas internas. Essa instabilidade pode apontar limitações estruturais na economia brasileira, especialmente na balança comercial e nas transações correntes com o exterior.
+
+A comparação reforça a diferença entre economias com bases exportadoras sólidas e países em desenvolvimento com maior exposição a oscilações do mercado global. Além disso, a evolução do saldo da conta corrente ao longo do tempo ajuda a entender como cada país reage a crises econômicas, choques externos e mudanças na política econômica.
+
+```{r}
+#| label: graficodadosempainel
+#| warning: false
+#| echo: false
+
+ggplotly(grafpainel, tooltip = "text")
+```
+
+## **Análise Geográfica – Mapa do Saldo da Conta Corrente (2023)**
+
+O mapa mundial do saldo da conta corrente em 2023 revela padrões regionais marcantes. Os países destacados em tons de verde apresentam superávits expressivos, enquanto os tons avermelhados indicam déficits significativos. Economias como Alemanha, China, Noruega e Singapura aparecem com superávits robustos, reforçando sua posição como grandes exportadores líquidos e centros de poupança global.
+
+Por outro lado, países como os Estados Unidos, Reino Unido, Canadá e diversas nações da América Latina e África exibem déficits, refletindo maior consumo externo do que produção, ou dependência de importações e capitais externos. O Brasil, especificamente, aparece com um déficit moderado, indicando uma balança de transações correntes ainda desequilibrada, mas não crítica.
+
+Essa representação visual permite observar como os desequilíbrios externos estão distribuídos geograficamente. Regiões como Europa Ocidental e Ásia Oriental concentram superávits, enquanto América e partes da África acumulam déficits. O contraste entre os extremos evidencia as diferenças estruturais nas economias e nas estratégias comerciais adotadas por cada país ou região.
+
+```{r}
+#| label: graficocortetransversal
+#| warning: false
+#| echo: false
+
+ggplotly(grafico_mapa, tooltip = "text") %>%
+  layout(height = 700, width = 1100)
+```
+
+## Grafico Série Temporal em relação ao balanco da conta corrente brasileira
+
+A evolução do saldo da conta corrente brasileira revela um histórico de oscilações marcantes entre superávits e déficits ao longo dos anos. O gráfico destaca o ano de **2006** como o maior superávit, período em que o país se beneficiava de um ciclo favorável de commodities e forte demanda internacional, especialmente da China. Já o maior déficit ocorreu em **2014**, refletindo uma conjuntura de baixo crescimento econômico, aumento das importações e deterioração das contas externas.
+
+Essas variações indicam a sensibilidade da economia brasileira aos ciclos econômicos e ao cenário internacional. A dependência de exportações de commodities, a vulnerabilidade cambial e os fluxos de capitais estrangeiros são fatores que afetam diretamente a conta corrente. Ao contrário de países com superávits constantes, o Brasil enfrenta maior dificuldade em manter um saldo positivo de forma sustentada.
+
+O comportamento da conta corrente também serve como termômetro das condições macroeconômicas do país e da sua inserção nas cadeias produtivas globais. Quando o Brasil apresenta déficit, há maior necessidade de financiamento externo, o que pode aumentar a exposição a choques financeiros. Já os períodos de superávit geralmente coincidem com crescimento das exportações e controle das despesas externas.
+
+```{r}
+#| label: graficoserietemporal
+#| warning: false
+#| echo: false
+
+ggplotly(grafico_brasil, tooltip = "text")
+```
