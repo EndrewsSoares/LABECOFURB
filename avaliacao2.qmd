@@ -1,0 +1,87 @@
+---
+title: "Endrews Soares"
+format: html
+editor: visual
+---
+
+```{r}
+#| label: load-packages
+#| include: false
+
+library(rbcb)
+library(ggplot2)
+library(gganimate)
+library(transformr)
+library(lubridate)
+library(dplyr)
+library(gifski)
+
+# Baixar dados a partir de 1995
+df.bcb <- get_series(
+  c(vestuario = 1638),
+  start_date = as.Date("1995-01-01"),
+  end_date = Sys.Date()
+)
+
+# Preparar dados anuais
+df.ano <- df.bcb %>%
+  mutate(ano = year(date)) %>%
+  group_by(ano) %>%
+  summarise(valor_medio = mean(vestuario, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(label = sprintf("%.2f%%", valor_medio)) %>%
+  mutate(label = factor(label, levels = unique(label)))
+```
+
+## Análise Animada do IPCA - Vestuário: Variação Média Anual a partir de 1995
+
+Este gráfico animado apresenta a variação média anual do Índice Nacional de Preços ao Consumidor Amplo (IPCA) para o setor de Vestuário no Brasil, considerando dados a partir do ano de 1995 até o presente. O IPCA é o índice oficial utilizado pelo Banco Central para medir a inflação no país, refletindo a variação dos preços para o consumidor final.
+
+### O que o gráfico mostra?
+
+**Linha crescente**: A linha azul escura representa a trajetória da variação média anual do IPCA para Vestuário ao longo dos anos, permitindo observar tendências de alta ou queda.
+
+**Bolihas vermelhas**: Cada bolinha indica o valor médio anual da variação para um determinado ano.
+
+**Rótulos percentuais**: Abaixo de cada bolinha, o valor exato da variação média anual é exibido, facilitando a leitura e compreensão dos dados.
+
+**Animação progressiva**: Os anos são apresentados um a um, mostrando a evolução temporal da inflação no segmento de Vestuário, com os pontos e valores anteriores permanecendo visíveis para facilitar a comparação histórica.
+
+### Importância do tema
+
+O setor de Vestuário é um componente essencial da cesta de consumo das famílias brasileiras. Entender sua inflação anual ajuda consumidores, comerciantes e formuladores de políticas públicas a monitorar o impacto da variação de preços no custo de vida e nas decisões econômicas relacionadas a esse segmento.
+
+### Interpretação rápida
+
+Flutuações na linha indicam anos em que o vestuário teve inflação mais alta ou mais baixa.
+
+Picos ou quedas repentinas podem estar associados a eventos econômicos, variações cambiais ou mudanças sazonais de mercado.
+
+A animação evidencia como o setor evoluiu ao longo de quase três décadas, oferecendo uma visão clara e dinâmica do comportamento dos preços.
+
+```{r}
+#| label: graficodadosempainel
+#| warning: false
+#| echo: false
+
+ggplot(df.ano, aes(x = ano, y = valor_medio)) +
+  geom_line(color = "#2c3e50", linewidth = 1.2) +
+  geom_point(size = 3, color = "#e74c3c") +               # bolinhas menores
+  geom_text(aes(label = label), vjust = -1, size = 3) +  # texto um pouco acima das bolinhas
+  labs(
+    title = "IPCA - Vestuário (Média Anual)",
+    subtitle = "Ano: {frame_time}",
+    x = "Ano",
+    y = "Variação média anual (%)"
+  ) +
+  theme_minimal(base_size = 15) +
+  theme(
+    plot.title = element_text(face = "bold"),
+    plot.subtitle = element_text(color = "gray40"),
+    plot.margin = margin(10, 10, 20, 10)                 # margem inferior maior para texto
+  ) +
+  transition_time(ano) +
+  shadow_mark(alpha = 1, size = 3, exclude_layer = "text")
+```
+
+## 
